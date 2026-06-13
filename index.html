@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ore Reprocessing Value — Jita 4-4</title>
+<style>
+  :root {
+    --bg: #0a0e14;
+    --panel: #121826;
+    --line: #232c3d;
+    --text: #d6dde8;
+    --muted: #6e7c92;
+    --accent: #4fd1c5;
+    --gold: #e8b15a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 32px 16px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  h1 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--gold);
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 12px;
+    margin-bottom: 4px;
+  }
+  .sub {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-bottom: 24px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--panel);
+    border: 1px solid var(--line);
+  }
+  th, td {
+    padding: 8px 10px;
+    text-align: right;
+    border-bottom: 1px solid var(--line);
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+  th:first-child, td:first-child {
+    text-align: left;
+  }
+  th {
+    color: var(--muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+  }
+  tbody tr:hover { background: #1a2333; }
+  tfoot td {
+    font-weight: 600;
+    color: var(--gold);
+    border-top: 2px solid var(--line);
+    border-bottom: none;
+  }
+  .ore-name { color: var(--accent); font-weight: 600; }
+  .status {
+    margin-top: 16px;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .err { color: #e07a7a; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Ore Reprocessing Value — Jita 4-4</h1>
+  <div class="sub">Lowest current sell-order price per mineral unit at Jita IV - Moon 4 (The Forge), via ESI. Values shown are per single unit of ore reprocessed.</div>
+
+  <table id="oreTable">
+    <thead>
+      <tr><th>Ore</th><th>m3/unit</th><th>Ore Sell Price (per unit)</th><th>Mineral Value (per unit)</th><th>Mineral Value per m3</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <h1 style="margin-top:32px;">Mineral Sell Prices (Jita 4-4)</h1>
+  <table id="mineralTable">
+    <thead>
+      <tr><th>Mineral</th><th>Lowest Sell (ISK)</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div class="status" id="status">Loading prices from ESI...</div>
+</div>
+
+<script>
+const JITA_STATION_ID = 60003760;
+const FORGE_REGION_ID = 10000002;
+
+// Mineral type IDs
+const MINERALS = {
+  Pyerite:  35,
+  Mexallon: 36,
+  Isogen:   37,
+  Zydrine:  39,
+  Megacyte: 40
+};
+
+const REFINE_RATE = 0.85;
+
+// Ore type IDs (for direct market sell price)
+const ORE_TYPE_IDS = {
+  Arkonor: 22,
+  Bistot: 1230,
+  Gneiss: 1228,
+  Kernite: 20,
+  Omber: 1227,
+  Pyroxeres: 18
+};
+
+// Ore data: volume per unit, and mineral yield per 100 units (from spreadsheet)
+const ORES = {
+  Arkonor:   { m3: 16,   yields: { Pyerite: 3680, Mexallon: 1380, Megacyte: 138 } },
+  Bistot:    { m3: 16,   yields: { Pyerite: 3680, Mexallon: 1380, Zydrine: 184 } },
+  Gneiss:    { m3: 5,    yields: { Pyerite: 2300, Mexallon: 1725, Isogen: 920 } },
+  Kernite:   { m3: 1.2,  yields: { Mexallon: 69, Isogen: 138 } },
+  Omber:     { m3: 0.6,  yields: { Pyerite: 104, Isogen: 86 } },
+  Pyroxeres: { m3: 0.3,  yields: { Pyerite: 104, Mexallon: 35 } }
+};
+
+async function getLowestSell(typeId) {
+  let page = 1;
+  let lowest = null;
+  while (true) {
+    const url = `https://esi.evetech.net/latest/markets/${FORGE_REGION_ID}/orders/?order_type=sell&type_id=${typeId}&page=${page}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`ESI error ${res.status} for type ${typeId}`);
+    const orders = await res.json();
+    for (const o of orders) {
+      if (o.location_id === JITA_STATION_ID) {
+        if (lowest === null || o.price < lowest) lowest = o.price;
+      }
+    }
+    const totalPages = parseInt(res.headers.get('X-Pages') || '1', 10);
+    if (page >= totalPages) break;
+    page++;
+  }
+  return lowest;
+}
+
+function fmtISK(n) {
+  return n.toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' ISK';
+}
+
+async function main() {
+  const statusEl = document.getElementById('status');
+  const prices = {};
+
+  // Fetch all mineral prices in parallel
+  const names = Object.keys(MINERALS);
+  const results = await Promise.allSettled(
+    names.map(name => getLowestSell(MINERALS[name]))
+  );
+
+  let errors = [];
+  names.forEach((name, i) => {
+    if (results[i].status === 'fulfilled' && results[i].value !== null) {
+      prices[name] = results[i].value;
+    } else {
+      prices[name] = null;
+      errors.push(name);
+    }
+  });
+
+  // Fetch ore sell prices in parallel
+  const oreNames = Object.keys(ORE_TYPE_IDS);
+  const oreResults = await Promise.allSettled(
+    oreNames.map(name => getLowestSell(ORE_TYPE_IDS[name]))
+  );
+  const orePrices = {};
+  oreNames.forEach((name, i) => {
+    if (oreResults[i].status === 'fulfilled' && oreResults[i].value !== null) {
+      orePrices[name] = oreResults[i].value;
+    } else {
+      orePrices[name] = null;
+      errors.push(`${name} (ore)`);
+    }
+  });
+
+  // Render mineral table
+  const mBody = document.querySelector('#mineralTable tbody');
+  for (const name of names) {
+    const tr = document.createElement('tr');
+    const price = prices[name];
+    tr.innerHTML = `<td>${name}</td><td>${price !== null ? fmtISK(price) : 'unavailable'}</td>`;
+    mBody.appendChild(tr);
+  }
+
+  // Render ore table
+  const oBody = document.querySelector('#oreTable tbody');
+  for (const [oreName, data] of Object.entries(ORES)) {
+    let totalPer100 = 0;
+    let complete = true;
+    for (const [mineral, qty] of Object.entries(data.yields)) {
+      if (prices[mineral] === null) { complete = false; continue; }
+      totalPer100 += prices[mineral] * qty * REFINE_RATE;
+    }
+    const valuePerUnit = totalPer100 / 100;
+    const valuePerM3 = totalPer100 / (data.m3 * 100);
+    const oreSell = orePrices[oreName];
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="ore-name">${oreName}</td>
+      <td>${data.m3}</td>
+      <td>${oreSell !== null && oreSell !== undefined ? fmtISK(oreSell) : 'unavailable'}</td>
+      <td>${complete ? fmtISK(valuePerUnit) : 'incomplete'}</td>
+      <td>${complete ? fmtISK(valuePerM3) : 'incomplete'}</td>
+    `;
+    oBody.appendChild(tr);
+  }
+
+  if (errors.length) {
+    statusEl.innerHTML = `<span class="err">Failed to fetch: ${errors.join(', ')}. Try refreshing.</span>`;
+  } else {
+    statusEl.textContent = `Updated ${new Date().toLocaleString()}`;
+  }
+}
+
+main().catch(err => {
+  document.getElementById('status').innerHTML = `<span class="err">${err.message}</span>`;
+});
+</script>
+</body>
+</html>
