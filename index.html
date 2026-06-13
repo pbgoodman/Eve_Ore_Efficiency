@@ -84,7 +84,7 @@
 
   <table id="oreTable">
     <thead>
-      <tr><th>Ore</th><th>m3/unit</th><th>Ore Sell Price (per unit)</th><th>Mineral Value (per unit)</th><th>Mineral Value per m3</th></tr>
+      <tr><th>Ore</th><th>m3/unit</th><th>Compressed Ore Sell Price (per unit)</th><th>Mineral Value (per unit)</th><th>Mineral Value per m3</th></tr>
     </thead>
     <tbody></tbody>
   </table>
@@ -115,14 +115,14 @@ const MINERALS = {
 
 const REFINE_RATE = 0.85;
 
-// Ore type IDs (for direct market sell price)
+// Ore type IDs (compressed variants, for direct market sell price)
 const ORE_TYPE_IDS = {
-  Arkonor: 22,
-  Bistot: 1230,
-  Gneiss: 1228,
-  Kernite: 20,
-  Omber: 1227,
-  Pyroxeres: 18
+  Arkonor: 62568,
+  Bistot: 62564,
+  Gneiss: 62552,
+  Kernite: 62536,
+  Omber: 62532,
+  Pyroxeres: 62524
 };
 
 // Ore data: volume per unit, and mineral yield per 100 units (from spreadsheet)
